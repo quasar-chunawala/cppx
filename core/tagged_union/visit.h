@@ -19,89 +19,6 @@
 #include <utility>
 #include <variant>
 
-namespace dev {
-	namespace tools {
-
-		template <typename T, size_t Dim, size_t... MoreDims>
-		struct poly_array;
-
-		// Base case - a 1d vector
-		template <typename T, size_t Dim> struct poly_array<T, Dim> {
-			std::array<T, Dim> func_;
-
-			constexpr T &operator[](size_t i) { return func_[i]; }
-
-			constexpr const T &operator[](size_t i) const {
-				return func_[i];
-			}
-
-			constexpr poly_array(std::initializer_list<T> rng)
-			    : poly_array() {
-				auto it{rng.begin()};
-				for (size_t i{0}; i < rng.size(); ++i) {
-					func_[i] = *it;
-					++it;
-				}
-			}
-
-			constexpr poly_array &operator=(std::initializer_list<T> rng) {
-				poly_array(rng).swap(*this);
-				return *this;
-			}
-
-			constexpr poly_array &swap(poly_array<T, Dim> &other) {
-				std::swap(func_, other.func_);
-				return *this;
-			}
-
-			constexpr poly_array() : func_{} {}
-		};
-
-		// Generalization - a (sizeof...(MoreDims) + 1)d tensor
-		template <typename T, size_t Dim, size_t... MoreDims>
-		struct poly_array {
-			std::array<poly_array<T, MoreDims...>, Dim> func_;
-
-			constexpr poly_array<T, MoreDims...> &operator[](size_t i) {
-				return func_[i];
-			}
-
-			constexpr const poly_array<T, MoreDims...> &
-			operator[](size_t i) const {
-				return func_[i];
-			}
-
-			template <typename U>
-			constexpr poly_array(
-			    std::initializer_list<std::initializer_list<U>> rng)
-			    : poly_array{} {
-				auto it{rng.begin()};
-				for (size_t i{0}; i < rng.size(); ++i) {
-					func_[i] = *it;
-					++it;
-				}
-			}
-
-			constexpr poly_array &
-			swap(poly_array<T, Dim, MoreDims...> &other) {
-				std::swap(func_, other.func_);
-				return *this;
-			}
-
-			template <typename U>
-			constexpr poly_array &operator=(
-			    std::initializer_list<std::initializer_list<U>> rng) {
-				poly_array(rng).swap(*this);
-				return *this;
-			}
-
-			constexpr poly_array() : func_{} {}
-		};
-
-	}; // namespace tools
-
-} // namespace dev
-
 namespace dev::tools {
 	template <std::size_t... Dimensions>
 	constexpr auto build_coeffs_array() {
@@ -197,7 +114,8 @@ namespace dev {
 		using Wrapper = std::conditional_t<std::is_void_v<T>, Dummy, T>;
 
 		template <typename Visitor, typename Variant0, typename Variant1>
-		decltype(auto) visit(Visitor &&visitor, Variant0 v0, Variant1 v1) {
+		decltype(auto) visit(Visitor &&visitor, Variant0 va0,
+		                     Variant1 va1) {
 			constexpr std::array<std::size_t, 2> dimensions = {
 			    std::variant_size_v<Variant0>,
 			    std::variant_size_v<Variant1>};
@@ -208,16 +126,16 @@ namespace dev {
 			static constexpr auto vtable{
 			    []<size_t... Indices>(std::index_sequence<Indices...>) {
 				    return std::array<cases_t, 4>{
-				        [](Visitor vis, Variant0 v0, Variant1 v1) {
+				        [](Visitor vis, Variant0 va0, Variant1 va1) {
 					        constexpr auto multi_idx =
 					            dev::tools::from_index<2, 2>(Indices);
-					        return vis(std::get<multi_idx[0]>(v0),
-					                   std::get<multi_idx[1]>(v1));
+					        return vis(std::get<multi_idx[0]>(va0),
+					                   std::get<multi_idx[1]>(va1));
 				        }...};
 			    }(std::make_index_sequence<vtable_size>())};
 
 			return vtable[dev::tools::to_index<2, 2>(
-			    v0.index(), v1.index())](visitor, v0, v1);
+			    va0.index(), va1.index())](visitor, va0, va1);
 		}
 	}; // namespace example
 } // namespace dev
@@ -227,12 +145,12 @@ template <typename... Callables> struct Visitor : Callables... {
 };
 
 void test_single_dispatch() {
-	std::variant<int, float, double> v{0};
+	std::variant<int, float, double> va{0};
 }
 
 void test_double_dispatch() {
-	std::variant<int, float> v1{0};
-	std::variant<int, float> v2{3.14f};
+	std::variant<int, float> va1{0};
+	std::variant<int, float> va2{3.14f};
 
 	auto result = dev::example::visit(
 	    Visitor{
@@ -241,12 +159,12 @@ void test_double_dispatch() {
 	        [](float, int) -> std::string { return "(float, int)"; },
 	        [](float, float) -> std::string { return "(float, float)"; },
 	    },
-	    v1,
-	    v2);
+	    va1,
+	    va2);
 	std::cout << "result = " << result << "\n";
 }
 
-namespace dev {
+namespace dev::flat_array {
 	template <typename Visitor, typename... Variants>
 	decltype(auto) visit(Visitor &&visitor, Variants &&...vs) {
 		constexpr std::size_t vtable_size =
@@ -272,7 +190,7 @@ namespace dev {
 				    Indices);
 				return [&]<size_t... Is>(std::index_sequence<Is...>) {
 					return vis((static_cast<std::variant_alternative_t<
-					                Is,
+					                multi_idx[Is],
 					                std::remove_cvref_t<Variants>>>(
 					    std::get<multi_idx[Is]>(vs)))...);
 				}(std::make_index_sequence<sizeof...(Variants)>());
@@ -284,18 +202,27 @@ namespace dev {
 		    vs.index()...);
 		return vtable[i](visitor, vs...);
 	}
-} // namespace dev
+} // namespace dev::flat_array
 
 void test_multiple_dispatch() {
-	std::variant<int, float, double> v1{0};
-	std::variant<int, float, double> v2{3.14f};
+	std::variant<int, float, double> v1{2.5f};
+	std::variant<int, float, double> v2{3};
 	// std::variant<char, int, long, float, double> v3{'H'};
 
-	auto result = dev::visit(
-	    Visitor{[](int, int) -> std::string { return "(int, int)"; },
-	            [](int, float) -> std::string { return "(int, float)"; },
-	            [](int, double) -> std::string { return "(int, double)"; },
-	            [](float, int) -> std::string { return "(float, int)"; }},
+	auto result = dev::flat_array::visit(
+	    Visitor{
+	        [](int, int) -> std::string { return "(int, int)"; },
+	        [](int, float) -> std::string { return "(int, float)"; },
+	        [](int, double) -> std::string { return "(int, double)"; },
+	        [](float, int) -> std::string { return "(float, int)"; },
+	        [](float, float) -> std::string { return "(float, float)"; },
+	        [](float, double) -> std::string { return "(float, double)"; },
+	        [](double, int) -> std::string { return "(double, int)"; },
+	        [](double, float) -> std::string { return "(double, float)"; },
+	        [](double, double) -> std::string {
+		        return "(double, double)";
+	        },
+	    },
 	    v1,
 	    v2);
 

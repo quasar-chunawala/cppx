@@ -67,7 +67,7 @@ There are various configuration presets defined in `/CMakePresets.json`. To conf
 cmake --preset <preset-name>
 ```
 
-Various build presets are defined in `/CMakePresets.json`.
+Various build presets are defined in `/CMakePresets.json`. To build:
 
 ```
 cmake --build --preset <preset-name>
